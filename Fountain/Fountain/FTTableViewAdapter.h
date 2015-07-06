@@ -10,6 +10,11 @@
 
 #import "FTDataSource.h"
 
+@protocol FTTableViewAdapter <UITableViewDelegate>
+@optional
+- (BOOL)tableView:(UITableView *)tableView shouldCollapseSection:(NSInteger)section;
+@end
+
 typedef void(^FTTableViewAdapterCellPrepareBlock)(id cell, id item, NSIndexPath *indexPath, id<FTDataSource> dataSource);
 typedef void(^FTTableViewAdapterHeaderFooterPrepareBlock)(id view, id item, NSUInteger section, id<FTDataSource> dataSource);
 
@@ -40,6 +45,11 @@ typedef void(^FTTableViewAdapterHeaderFooterPrepareBlock)(id view, id item, NSUI
 @property (nonatomic, assign) CGFloat rowHeight;
 @property (nonatomic, assign) CGFloat sectionHeaderHeight;
 @property (nonatomic, assign) CGFloat sectionFooterHeight;
+
+#pragma mark Collapsed Sections
+@property (nonatomic, readonly) NSIndexSet *collapsedSections;
+- (void)collapseSections:(NSIndexSet *)sections animated:(BOOL)animated;
+- (void)expandSections:(NSIndexSet *)sections animated:(BOOL)animated;
 
 #pragma mark Prepare Handler
 

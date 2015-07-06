@@ -17,7 +17,9 @@
 @property (nonatomic, assign) NSInteger userDrivenChangeCount;
 @end
 
-@implementation FTTableViewAdapter
+@implementation FTTableViewAdapter {
+    NSMutableIndexSet *_collapsedSections;
+}
 
 #pragma mark Life-cycle
 
@@ -37,6 +39,7 @@
         _headerPrepareHandler = [[NSMutableArray alloc] init];
         _footerPrepareHandler = [[NSMutableArray alloc] init];
         _userDrivenChangeCount = 0;
+        _collapsedSections = [[NSMutableIndexSet alloc] init];
     }
     return self;
 }
@@ -55,8 +58,40 @@
         [_dataSource removeObserver:self];
         _dataSource = dataSource;
         [_dataSource addObserver:self];
+        
+        [_collapsedSections removeAllIndexes];
+        if ([self.delegate respondsToSelector:@selector(tableView:shouldCollapseSection:)]) {
+            id<FTTableViewAdapter> delegate = (id<FTTableViewAdapter>)self.delegate;
+            [_collapsedSections removeAllIndexes];
+            for (NSInteger section = 0; section < [self.dataSource numberOfSections]; section++) {
+                BOOL collapse = [delegate tableView:self.tableView shouldCollapseSection:section];
+                if (collapse) {
+                    [_collapsedSections addIndex:section];
+                }
+            }
+        }
+        
         [self.tableView reloadData];
     }
+}
+
+#pragma mark Collapsed Sections
+
+- (NSIndexSet *)collapsedSections
+{
+    return [_collapsedSections copy];
+}
+
+- (void)collapseSections:(NSIndexSet *)sections animated:(BOOL)animated
+{
+    [_collapsedSections addIndexes:sections];
+    [self.tableView reloadSections:sections withRowAnimation:animated ? UITableViewRowAnimationAutomatic : UITableViewRowAnimationNone];
+}
+
+- (void)expandSections:(NSIndexSet *)sections animated:(BOOL)animated
+{
+    [_collapsedSections removeIndexes:sections];
+    [self.tableView reloadSections:sections withRowAnimation:animated ? UITableViewRowAnimationAutomatic : UITableViewRowAnimationNone];
 }
 
 #pragma mark Prepare Handler
@@ -464,7 +499,11 @@ useCellWithReuseIdentifier:(NSString *)reuseIdentifier
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
     if (tableView == self.tableView) {
-        return [self.dataSource numberOfItemsInSection:section];
+        if ([self.collapsedSections containsIndex:section]) {
+            return 0;
+        } else {
+            return [self.dataSource numberOfItemsInSection:section];
+        }
     } else {
         return 0;
     }
@@ -566,6 +605,16 @@ useCellWithReuseIdentifier:(NSString *)reuseIdentifier
 - (void)dataSourceDidReload:(id<FTDataSource>)dataSource
 {
     if (dataSource == self.dataSource) {
+        if ([self.delegate respondsToSelector:@selector(tableView:shouldCollapseSection:)]) {
+            id<FTTableViewAdapter> delegate = (id<FTTableViewAdapter>)self.delegate;
+            [_collapsedSections removeAllIndexes];
+            for (NSInteger section = 0; section < [self.dataSource numberOfSections]; section++) {
+                BOOL collapse = [delegate tableView:self.tableView shouldCollapseSection:section];
+                if (collapse) {
+                    [_collapsedSections addIndex:section];
+                }
+            }
+        }
         [self.tableView reloadData];
     }
 }
@@ -621,28 +670,49 @@ useCellWithReuseIdentifier:(NSString *)reuseIdentifier
 - (void)dataSource:(id<FTDataSource>)dataSource didInsertItemsAtIndexPaths:(NSArray *)indexPaths
 {
     if (dataSource == self.dataSource && self.userDrivenChange == NO) {
-        [self.tableView insertRowsAtIndexPaths:indexPaths withRowAnimation:self.rowAnimation];
+        NSArray *filteredIndexPaths = [indexPaths filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSIndexPath *indexPath,
+                                                                                                                    NSDictionary<NSString *,id> * __nullable bindings) {
+            return ![self.collapsedSections containsIndex:indexPath.section];
+        }]];
+        [self.tableView insertRowsAtIndexPaths:filteredIndexPaths withRowAnimation:self.rowAnimation];
     }
 }
 
 - (void)dataSource:(id<FTDataSource>)dataSource didDeleteItemsAtIndexPaths:(NSArray *)indexPaths
 {
     if (dataSource == self.dataSource && self.userDrivenChange == NO) {
-        [self.tableView deleteRowsAtIndexPaths:indexPaths withRowAnimation:self.rowAnimation];
+        NSArray *filteredIndexPaths = [indexPaths filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSIndexPath *indexPath,
+                                                                                                                    NSDictionary<NSString *,id> * __nullable bindings) {
+            return ![self.collapsedSections containsIndex:indexPath.section];
+        }]];
+        [self.tableView deleteRowsAtIndexPaths:filteredIndexPaths withRowAnimation:self.rowAnimation];
     }
 }
 
 - (void)dataSource:(id<FTDataSource>)dataSource didReloadItemsAtIndexPaths:(NSArray *)indexPaths
 {
     if (dataSource == self.dataSource && self.reloadRowIfItemChanged && self.userDrivenChange == NO) {
-        [self.tableView reloadRowsAtIndexPaths:indexPaths withRowAnimation:self.rowAnimation];
+        NSArray *filteredIndexPaths = [indexPaths filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSIndexPath *indexPath,
+                                                                                                                    NSDictionary<NSString *,id> * __nullable bindings) {
+            return ![self.collapsedSections containsIndex:indexPath.section];
+        }]];
+        [self.tableView reloadRowsAtIndexPaths:filteredIndexPaths withRowAnimation:self.rowAnimation];
     }
 }
 
 - (void)dataSource:(id<FTDataSource>)dataSource didMoveItemAtIndexPath:(NSIndexPath *)indexPath toIndexPath:(NSIndexPath *)newIndexPath
 {
     if (dataSource == self.dataSource && self.userDrivenChange == NO) {
-        [self.tableView moveRowAtIndexPath:indexPath toIndexPath:newIndexPath];
+        
+        if ([self.collapsedSections containsIndex:indexPath.section] && [self.collapsedSections containsIndex:newIndexPath.section]) {
+            // Ignore
+        } else if ([self.collapsedSections containsIndex:indexPath.section]) {
+            [self.tableView insertRowsAtIndexPaths:@[indexPath] withRowAnimation:self.rowAnimation];
+        } else if ([self.collapsedSections containsIndex:newIndexPath.section]) {
+            [self.tableView deleteRowsAtIndexPaths:@[newIndexPath] withRowAnimation:self.rowAnimation];
+        } else {
+            [self.tableView moveRowAtIndexPath:indexPath toIndexPath:newIndexPath];
+        }
     }
 }
 
