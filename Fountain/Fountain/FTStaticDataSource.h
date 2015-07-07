@@ -10,10 +10,10 @@
 
 #import "FTDataSource.h"
 
-@interface FTStaticDataSource : NSObject <FTDataSource>
+@interface FTStaticDataSource : NSObject <FTDataSource, FTReverseDataSource>
 
 #pragma mark Relaod
 - (void)reloadWithItems:(NSArray *)sectionItems
-      completionHandler:(void(^)(BOOL success, NSError *error))completionHandler;
+      completionHandler:(void (^)(BOOL success, NSError *error))completionHandler;
 
 @end
